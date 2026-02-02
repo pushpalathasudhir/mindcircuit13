@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: mc-app
-        image: devopshubg333/batch13:23
+        image: pushpalathasudhir/batch13:23
         ports:
         - containerPort: 8080
 
