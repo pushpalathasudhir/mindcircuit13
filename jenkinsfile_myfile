@@ -1,0 +1,88 @@
+pipeline {
+    agent any
+
+    tools {
+        maven 'maven3'
+    }
+
+    environment {
+        DOCKER_IMAGE = "pushpalathasudhir/batch13"
+        GIT_REPO_NAME = "mindcircuit13"
+        GIT_USER_NAME = "pushpalathasudhir"
+        SONAR_HOST = "http://65.2.74.49:9000"
+    }
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                echo 'Cloning GitHub Repo'
+                git branch: 'main',
+                    url: "https://github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git"
+            }
+        }
+
+        stage('SonarQube Scan') {
+            steps {
+                echo 'Scanning project with SonarQube'
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    sh """
+                    mvn sonar:sonar \
+                    -Dsonar.host.url=${SONAR_HOST} \
+                    -Dsonar.login=${SONAR_TOKEN}
+                    """
+                }
+            }
+        }
+
+        stage('Build Artifact') {
+            steps {
+                echo 'Building Artifact'
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo 'Building Docker Image'
+                sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([string(credentialsId: 'dockerhub', variable: 'DOCKER_PASS')]) {
+                    sh """
+                    echo ${DOCKER_PASS} | docker login -u pushpalathasudhir --password-stdin
+                    docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                    """
+                }
+                echo 'Docker image pushed successfully'
+            }
+        }
+
+        stage('Update Deployment File') {
+            steps {
+                echo 'Updating Kubernetes deployment file'
+                withCredentials([string(credentialsId: 'githubtoken', variable: 'GITHUB_TOKEN')]) {
+                    sh """
+                    git config user.email "ci@jenkins.com"
+                    git config user.name "jenkins-ci"
+
+                    sed -i 's|batch13:.*|batch13:${BUILD_NUMBER}|g' deploymentfiles/deployment.yml
+
+                    git add deploymentfiles/deployment.yml
+                    git commit -m "Update image to ${BUILD_NUMBER}"
+                    git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git HEAD:main
+                    """
+                }
+            }
+        }
+    }
+}
